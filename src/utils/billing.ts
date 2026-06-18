@@ -24,74 +24,107 @@ export const calculateFee = (
     return a.startTime.localeCompare(b.startTime);
   });
 
-  const dayStart = getStartOfDay(startTime);
-  const dayEnd = getStartOfDay(endTime);
+  const expandedTiers: Array<{
+    tier: RateTier;
+    rangeStart: Date;
+    rangeEnd: Date;
+  }> = [];
 
-  let currentDate = new Date(dayStart);
+  const totalDays = Math.ceil(
+    (new Date(endTime.getFullYear(), endTime.getMonth(), endTime.getDate()).getTime() -
+      new Date(startTime.getFullYear(), startTime.getMonth(), startTime.getDate()).getTime()) /
+      (24 * 60 * 60 * 1000)
+  ) + 1;
 
-  while (currentDate <= dayEnd) {
-    const dayStr = currentDate.toDateString();
-    const bookingStart = startTime.toDateString() === dayStr
-      ? startTime
-      : getStartOfDay(currentDate);
-    const bookingEnd = endTime.toDateString() === dayStr
-      ? endTime
-      : new Date(getStartOfDay(currentDate).getTime() + 24 * 60 * 60 * 1000);
+  for (let dayOffset = -1; dayOffset < totalDays; dayOffset++) {
+    const dayDate = new Date(startTime);
+    dayDate.setDate(startTime.getDate() + dayOffset);
+    const dayStart = getStartOfDay(dayDate);
 
     for (const tier of sortedTiers) {
-      const tierStart = parseTime(tier.startTime, currentDate);
-      const tierEnd = parseTime(tier.endTime, currentDate);
+      let tierStart = parseTime(tier.startTime, dayDate);
+      let tierEnd = parseTime(tier.endTime, dayDate);
 
-      if (tier.startTime > tier.endTime) {
-        tierEnd.setDate(tierEnd.getDate() + 1);
+      if (tier.startTime >= tier.endTime) {
+        tierEnd = new Date(tierEnd.getTime() + 24 * 60 * 60 * 1000);
       }
 
-      const segmentStart = new Date(Math.max(bookingStart.getTime(), tierStart.getTime()));
-      const segmentEnd = new Date(Math.min(bookingEnd.getTime(), tierEnd.getTime()));
-
-      if (segmentStart < segmentEnd) {
-        const duration = diffMinutes(segmentStart, segmentEnd);
-        const amount = (duration / 60) * tier.pricePerHour;
-
-        segments.push({
-          tierId: tier.id,
-          tierName: tier.name,
-          color: tier.color,
-          startTime: new Date(segmentStart),
-          endTime: new Date(segmentEnd),
-          durationMinutes: duration,
-          amount: Math.round(amount * 100) / 100,
-        });
-
-        totalAmount += amount;
-        totalMinutes += duration;
-      }
+      expandedTiers.push({
+        tier,
+        rangeStart: tierStart,
+        rangeEnd: tierEnd,
+      });
     }
+  }
 
-    currentDate.setDate(currentDate.getDate() + 1);
+  for (const { tier, rangeStart, rangeEnd } of expandedTiers) {
+    const segmentStart = new Date(Math.max(startTime.getTime(), rangeStart.getTime()));
+    const segmentEnd = new Date(Math.min(endTime.getTime(), rangeEnd.getTime()));
+
+    if (segmentStart < segmentEnd) {
+      const duration = diffMinutes(segmentStart, segmentEnd);
+      const amount = (duration / 60) * tier.pricePerHour;
+
+      segments.push({
+        tierId: tier.id,
+        tierName: tier.name,
+        color: tier.color,
+        startTime: new Date(segmentStart),
+        endTime: new Date(segmentEnd),
+        durationMinutes: duration,
+        amount: Math.round(amount * 100) / 100,
+      });
+
+      totalAmount += amount;
+      totalMinutes += duration;
+    }
   }
 
   segments.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 
+  const mergedSegments: FeeSegment[] = [];
+  for (const seg of segments) {
+    const lastSeg = mergedSegments[mergedSegments.length - 1];
+    if (
+      lastSeg &&
+      lastSeg.tierId === seg.tierId &&
+      lastSeg.endTime.getTime() === seg.startTime.getTime()
+    ) {
+      lastSeg.endTime = seg.endTime;
+      lastSeg.durationMinutes += seg.durationMinutes;
+      lastSeg.amount = Math.round((lastSeg.amount + seg.amount) * 100) / 100;
+    } else {
+      mergedSegments.push({ ...seg });
+    }
+  }
+
   return {
-    segments,
+    segments: mergedSegments,
     totalAmount: Math.round(totalAmount * 100) / 100,
     totalMinutes,
   };
 };
 
 export const getTierAtTime = (time: Date, rateTiers: RateTier[]): RateTier | null => {
-  const timeStr = time.toTimeString().slice(0, 5);
+  const timeMinutes = time.getHours() * 60 + time.getMinutes();
   
   for (const tier of rateTiers) {
-    if (tier.startTime <= tier.endTime) {
-      if (timeStr >= tier.startTime && timeStr < tier.endTime) {
-        return tier;
-      }
-    } else {
-      if (timeStr >= tier.startTime || timeStr < tier.endTime) {
-        return tier;
-      }
+    const [sh, sm] = tier.startTime.split(':').map(Number);
+    const [eh, em] = tier.endTime.split(':').map(Number);
+    const tierStartMin = sh * 60 + sm;
+    let tierEndMin = eh * 60 + em;
+    
+    if (tierStartMin >= tierEndMin) {
+      tierEndMin += 24 * 60;
+    }
+
+    let checkMinutes = timeMinutes;
+    if (tierStartMin >= tierEndMin && timeMinutes < tierStartMin) {
+      checkMinutes += 24 * 60;
+    }
+
+    if (checkMinutes >= tierStartMin && checkMinutes < tierEndMin) {
+      return tier;
     }
   }
   
@@ -102,35 +135,125 @@ export const formatCurrency = (amount: number): string => {
   return `¥${amount.toFixed(2)}`;
 };
 
+export const checkTiersOverlap = (
+  tiers: RateTier[],
+  excludeId?: string
+): { hasOverlap: boolean; conflictInfo?: { tier1: string; tier2: string; overlapRange: string } } => {
+  const normalized: Array<{
+    id: string;
+    name: string;
+    start: number;
+    end: number;
+    startTime: string;
+    endTime: string;
+  }> = [];
+
+  for (const tier of tiers) {
+    if (excludeId && tier.id === excludeId) continue;
+    
+    const [sh, sm] = tier.startTime.split(':').map(Number);
+    const [eh, em] = tier.endTime.split(':').map(Number);
+    let startMin = sh * 60 + sm;
+    let endMin = eh * 60 + em;
+
+    if (startMin >= endMin) {
+      endMin += 24 * 60;
+    }
+
+    normalized.push({
+      id: tier.id,
+      name: tier.name,
+      start: startMin,
+      end: endMin,
+      startTime: tier.startTime,
+      endTime: tier.endTime,
+    });
+  }
+
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      const a = normalized[i];
+      const b = normalized[j];
+
+      const overlapsDirectly = a.start < b.end && b.start < a.end;
+
+      const aShiftedStart = a.start - 24 * 60;
+      const aShiftedEnd = a.end - 24 * 60;
+      const overlapsShifted1 = aShiftedStart < b.end && b.start < aShiftedEnd;
+
+      const bShiftedStart = b.start - 24 * 60;
+      const bShiftedEnd = b.end - 24 * 60;
+      const overlapsShifted2 = bShiftedStart < a.end && a.start < bShiftedEnd;
+
+      if (overlapsDirectly || overlapsShifted1 || overlapsShifted2) {
+        const overlapStart = Math.max(
+          overlapsDirectly ? a.start : overlapsShifted1 ? aShiftedStart : bShiftedStart,
+          overlapsDirectly ? b.start : overlapsShifted1 ? b.start : a.start
+        );
+        const overlapEnd = Math.min(
+          overlapsDirectly ? a.end : overlapsShifted1 ? aShiftedEnd : bShiftedEnd,
+          overlapsDirectly ? b.end : overlapsShifted1 ? b.end : a.end
+        );
+
+        const toTimeStr = (min: number) => {
+          const m = ((min % (24 * 60)) + 24 * 60) % (24 * 60);
+          const h = Math.floor(m / 60);
+          const mm = m % 60;
+          return `${h.toString().padStart(2, '0')}:${mm.toString().padStart(2, '0')}`;
+        };
+
+        return {
+          hasOverlap: true,
+          conflictInfo: {
+            tier1: a.name,
+            tier2: b.name,
+            overlapRange: `${toTimeStr(overlapStart)} ~ ${toTimeStr(overlapEnd)}`,
+          },
+        };
+      }
+    }
+  }
+
+  return { hasOverlap: false };
+};
+
 export const validateRateTiers = (rateTiers: RateTier[]): { valid: boolean; error?: string } => {
   if (rateTiers.length === 0) {
     return { valid: false, error: '至少需要一个费率档位' };
   }
 
-  const sorted = [...rateTiers].sort((a, b) => a.startTime.localeCompare(b.startTime));
-  
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const current = sorted[i];
-    const next = sorted[i + 1];
-    
-    if (current.endTime > next.startTime) {
-      return {
-        valid: false,
-        error: `费率档位"${current.name}"和"${next.name}"的时段重叠`
-      };
-    }
+  const overlap = checkTiersOverlap(rateTiers);
+  if (overlap.hasOverlap && overlap.conflictInfo) {
+    return {
+      valid: false,
+      error: `档位"${overlap.conflictInfo.tier1}"与"${overlap.conflictInfo.tier2}"在时段${overlap.conflictInfo.overlapRange}存在重叠`,
+    };
   }
 
-  const hasNightTier = sorted.some(t => t.startTime > t.endTime);
-  if (!hasNightTier) {
-    const firstStart = sorted[0].startTime;
-    const lastEnd = sorted[sorted.length - 1].endTime;
-    if (firstStart !== '00:00' || lastEnd !== '24:00') {
-      return {
-        valid: true,
-        error: '提示：费率未覆盖全天24小时，未覆盖时段将不计费'
-      };
-    }
+  const sorted = [...rateTiers].sort((a, b) => a.startTime.localeCompare(b.startTime));
+  
+  let coveredMinutes = 0;
+  const normalized = sorted.map(tier => {
+    const [sh, sm] = tier.startTime.split(':').map(Number);
+    const [eh, em] = tier.endTime.split(':').map(Number);
+    let startMin = sh * 60 + sm;
+    let endMin = eh * 60 + em;
+    if (startMin >= endMin) endMin += 24 * 60;
+    return { start: startMin, end: endMin, name: tier.name };
+  });
+
+  for (const seg of normalized) {
+    coveredMinutes += seg.end - seg.start;
+  }
+
+  if (coveredMinutes < 24 * 60) {
+    const uncovered = 24 * 60 - coveredMinutes;
+    const hours = Math.floor(uncovered / 60);
+    const mins = uncovered % 60;
+    return {
+      valid: true,
+      error: `提示：全天还有 ${hours}小时${mins > 0 ? mins + '分钟' : ''} 未被费率档位覆盖，该时段预约将不计费`,
+    };
   }
 
   return { valid: true };

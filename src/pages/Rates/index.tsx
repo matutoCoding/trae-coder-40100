@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import Badge from '@/components/ui/Badge';
 import { useAppStore } from '@/store/useAppStore';
-import { formatCurrency, validateRateTiers } from '@/utils/billing';
-import { Plus, Edit2, Trash2, DollarSign, Clock, AlertTriangle, TrendingUp, TrendingDown } from 'lucide-react';
+import { formatCurrency, validateRateTiers, checkTiersOverlap } from '@/utils/billing';
+import { 
+  Plus, Edit2, Trash2, DollarSign, Clock, 
+  AlertTriangle, TrendingUp, TrendingDown,
+  AlertOctagon
+} from 'lucide-react';
 
 const presetColors = [
   '#ef4444',
@@ -21,6 +25,7 @@ const Rates = () => {
   const { rateTiers, addRateTier, updateRateTier, deleteRateTier } = useAppStore();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     color: '#ef4444',
@@ -34,6 +39,7 @@ const Rates = () => {
 
   const openAddForm = () => {
     setEditingId(null);
+    setFormError('');
     setFormData({
       name: '',
       color: presetColors[rateTiers.length % presetColors.length],
@@ -47,6 +53,7 @@ const Rates = () => {
 
   const openEditForm = (tier: typeof rateTiers[0]) => {
     setEditingId(tier.id);
+    setFormError('');
     setFormData({
       name: tier.name,
       color: tier.color,
@@ -58,8 +65,48 @@ const Rates = () => {
     setShowForm(true);
   };
 
+  useEffect(() => {
+    if (!showForm) return;
+    
+    const tiersWithNew = editingId
+      ? rateTiers.map(t => t.id === editingId ? { ...t, ...formData, id: t.id } : t)
+      : [...rateTiers, { ...formData, id: 'new-tier-preview' }];
+    
+    const overlap = checkTiersOverlap(tiersWithNew, editingId ? undefined : 'new-tier-preview');
+    if (overlap.hasOverlap && overlap.conflictInfo) {
+      setFormError(
+        `时段冲突："${overlap.conflictInfo.tier1}"与"${overlap.conflictInfo.tier2}"在${overlap.conflictInfo.overlapRange}重叠`
+      );
+    } else {
+      setFormError('');
+    }
+  }, [formData.startTime, formData.endTime, showForm, editingId, rateTiers]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!formData.name.trim()) {
+      setFormError('请输入档位名称');
+      return;
+    }
+    if (formData.pricePerHour < 0) {
+      setFormError('每小时价格不能为负数');
+      return;
+    }
+
+    const tiersWithNew = editingId
+      ? rateTiers.map(t => t.id === editingId ? { ...t, ...formData, id: t.id } : t)
+      : [...rateTiers, { ...formData, id: 'new-tier-preview' }];
+    
+    const overlap = checkTiersOverlap(tiersWithNew, editingId ? undefined : 'new-tier-preview');
+    if (overlap.hasOverlap && overlap.conflictInfo) {
+      setFormError(
+        `保存失败：档位"${overlap.conflictInfo.tier1}"与"${overlap.conflictInfo.tier2}"在时段${overlap.conflictInfo.overlapRange}存在重叠`
+      );
+      return;
+    }
+
+    setFormError('');
     
     if (editingId) {
       updateRateTier(editingId, formData);
@@ -175,6 +222,9 @@ const Rates = () => {
                     <span className="text-sm text-gray-400 flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5" />
                       {tier.startTime} - {tier.endTime}
+                      {tier.startTime > tier.endTime && (
+                        <span className="text-xs text-purple-400 ml-1">(跨零点)</span>
+                      )}
                     </span>
                     <span className="text-sm text-safelight-amber font-mono">
                       {formatCurrency(tier.pricePerHour)}/小时
@@ -214,29 +264,40 @@ const Rates = () => {
         <div className="relative h-12 rounded-lg overflow-hidden bg-darkroom-bg">
           {sortedTiers.map((tier, idx) => {
             const startHour = parseInt(tier.startTime.split(':')[0]) + parseInt(tier.startTime.split(':')[1]) / 60;
-            const endHour = tier.endTime > tier.startTime
-              ? parseInt(tier.endTime.split(':')[0]) + parseInt(tier.endTime.split(':')[1]) / 60
-              : 24 + parseInt(tier.endTime.split(':')[0]) + parseInt(tier.endTime.split(':')[1]) / 60;
+            let endHour = parseInt(tier.endTime.split(':')[0]) + parseInt(tier.endTime.split(':')[1]) / 60;
+            if (tier.startTime > tier.endTime) {
+              endHour += 24;
+            }
             
             const left = (startHour / 24) * 100;
             const width = ((endHour - startHour) / 24) * 100;
             
-            return (
+            const segments: Array<{ left: number; width: number }> = [];
+            if (left + width > 100) {
+              segments.push({ left, width: 100 - left });
+              segments.push({ left: 0, width: (left + width) - 100 });
+            } else {
+              segments.push({ left, width });
+            }
+            
+            return segments.map((seg, segIdx) => (
               <div
-                key={tier.id}
+                key={`${tier.id}-${segIdx}`}
                 className="absolute top-0 h-full flex items-center justify-center"
                 style={{ 
-                  left: `${left}%`, 
-                  width: `${width}%`,
+                  left: `${seg.left}%`, 
+                  width: `${seg.width}%`,
                   backgroundColor: tier.color,
-                  opacity: 0.6,
+                  opacity: 0.7,
                 }}
               >
-                <span className="text-xs text-white font-medium drop-shadow">
-                  {tier.name}
-                </span>
+                {seg.width > 8 && (
+                  <span className="text-xs text-white font-medium drop-shadow px-1 truncate">
+                    {tier.name}
+                  </span>
+                )}
               </div>
-            );
+            ));
           })}
         </div>
         <div className="flex justify-between mt-2 text-xs text-gray-500">
@@ -255,6 +316,13 @@ const Rates = () => {
         size="md"
       >
         <form onSubmit={handleSubmit} className="space-y-4">
+          {formError && (
+            <div className="p-3 bg-red-900/30 border border-red-700 rounded-lg flex items-start gap-2">
+              <AlertOctagon className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-300">{formError}</p>
+            </div>
+          )}
+
           <div>
             <label className="label-dark">档位名称 *</label>
             <input
@@ -287,6 +355,9 @@ const Rates = () => {
                 onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
                 required
               />
+              {formData.startTime > formData.endTime && (
+                <p className="text-xs text-purple-400 mt-1">检测为跨零点时段</p>
+              )}
             </div>
           </div>
 
@@ -337,7 +408,11 @@ const Rates = () => {
             <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
               取消
             </button>
-            <button type="submit" className="btn-primary">
+            <button 
+              type="submit" 
+              className="btn-primary"
+              disabled={!!formError}
+            >
               {editingId ? '保存' : '创建'}
             </button>
           </div>
