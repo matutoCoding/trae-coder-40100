@@ -102,14 +102,18 @@ const DayView = ({ workstationId, filterSearch = '', filterBillStatus = 'all' }:
     const displayStart = new Date(Math.max(start.getTime(), dayStart.getTime()));
     const displayEnd = new Date(Math.min(end.getTime(), dayEnd.getTime()));
 
-    const startHour = displayStart.getHours() + displayStart.getMinutes() / 60;
-    const endHour = displayEnd.getHours() + displayEnd.getMinutes() / 60;
+    const startsBeforeDay = start < dayStart;
+    const endsAfterDay = end > dayEnd;
+
+    const startHour = startsBeforeDay
+      ? 0
+      : displayStart.getHours() + displayStart.getMinutes() / 60;
+    const endHour = endsAfterDay
+      ? 24
+      : displayEnd.getHours() + displayEnd.getMinutes() / 60;
 
     const top = (startHour - START_HOUR) * HOUR_HEIGHT;
     const height = Math.max(20, (endHour - startHour) * HOUR_HEIGHT);
-
-    const startsBeforeDay = start < dayStart;
-    const endsAfterDay = end > dayEnd;
 
     return { top, height, startsBeforeDay, endsAfterDay };
   };

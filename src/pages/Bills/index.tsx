@@ -84,12 +84,11 @@ const Bills = () => {
   }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   const totalUnpaid = bills
-    .filter(b => b.status === 'unpaid')
-    .reduce((sum, b) => sum + b.actualAmount, 0);
+    .filter(b => b.status === 'unpaid' || b.status === 'partial')
+    .reduce((sum, b) => sum + Math.max(0, b.actualAmount - (b.paidAmount || 0)), 0);
   
   const totalPaid = bills
-    .filter(b => b.status === 'paid')
-    .reduce((sum, b) => sum + b.actualAmount, 0);
+    .reduce((sum, b) => sum + (b.paidAmount || 0), 0);
 
   const handlePay = () => {
     if (selectedBillId) {
@@ -143,7 +142,7 @@ const Bills = () => {
         subtitle="查看和管理所有账单"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <div className="card-dark p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-safelight-amber/20 rounded-lg">
@@ -163,7 +162,20 @@ const Bills = () => {
             <div>
               <p className="text-sm text-gray-400">待付款</p>
               <p className="text-xl font-bold text-yellow-400 font-display">
-                {bills.filter(b => b.status === 'unpaid').length}
+                {bills.filter(b => b.status === 'unpaid' || b.status === 'partial').length}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="card-dark p-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-purple-900/30 rounded-lg">
+              <CreditCard className="w-5 h-5 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">部分收款</p>
+              <p className="text-xl font-bold text-purple-400 font-display">
+                {bills.filter(b => b.status === 'partial').length}
               </p>
             </div>
           </div>
@@ -274,15 +286,30 @@ const Bills = () => {
                             已收 {formatCurrency(bill.paidAmount || 0)}
                           </span>
                         )}
+                        {bill.status !== 'paid' && bill.status !== 'refunded' && (bill.paidAmount || 0) < bill.actualAmount && (
+                          <span className="text-xs text-red-400 font-mono">
+                            未收 {formatCurrency(Math.max(0, bill.actualAmount - (bill.paidAmount || 0)))}
+                          </span>
+                        )}
                         {bill.discount > 0 && (
                           <span className="text-xs text-gray-500 line-through font-mono">
                             原价 {formatCurrency(bill.totalAmount)}
                           </span>
                         )}
-                        {bill.status !== 'paid' && bill.status !== 'refunded' && (bill.paidAmount || 0) < bill.actualAmount && (
-                          <span className="text-xs text-red-400 font-mono">
-                            未收 {formatCurrency(Math.max(0, bill.actualAmount - (bill.paidAmount || 0)))}
-                          </span>
+                        {bill.paymentRecords && bill.paymentRecords.length > 0 && (
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            <span className="text-gray-400">{bill.paymentRecords.length}次收款</span>
+                            {(() => {
+                              const latest = bill.paymentRecords!
+                                .slice()
+                                .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())[0];
+                              return latest ? (
+                                <span className="font-mono ml-1">
+                                  · 最近 {latest.paymentMethod} +{formatCurrency(latest.amount)}
+                                </span>
+                              ) : null;
+                            })()}
+                          </div>
                         )}
                       </div>
                     </td>

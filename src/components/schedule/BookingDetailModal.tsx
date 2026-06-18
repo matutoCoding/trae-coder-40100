@@ -6,7 +6,7 @@ import { formatDateTime, formatDuration, diffMinutes } from '@/utils/date';
 import { formatCurrency } from '@/utils/billing';
 import { 
   CalendarDays, User, Phone, Clock, DollarSign, FileText, 
-  XCircle, CheckCircle, Edit3 
+  XCircle, CheckCircle, Edit3, History
 } from 'lucide-react';
 import BookingFormModal from './BookingFormModal';
 
@@ -140,12 +140,64 @@ const BookingDetailModal = ({ isOpen, onClose, bookingId }: BookingDetailModalPr
                     <span className="text-green-400 font-mono">-{formatCurrency(relatedBill.discount)}</span>
                   </div>
                 )}
-                <div className="flex items-center justify-between pt-1">
+                <div className="flex items-center justify-between">
                   <span className="text-gray-300 font-medium">应付金额</span>
-                  <span className="text-xl font-bold text-safelight-amber font-mono">
+                  <span className="text-lg font-bold text-safelight-amber font-mono">
                     {formatCurrency(relatedBill.actualAmount)}
                   </span>
                 </div>
+
+                <div className="pt-2 mt-2 border-t border-darkroom-border">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-400 flex items-center gap-1.5">
+                      收款状态
+                      {relatedBill.status === 'paid' && <Badge variant="success">已结清</Badge>}
+                      {relatedBill.status === 'partial' && <Badge variant="purple">部分收款</Badge>}
+                      {relatedBill.status === 'unpaid' && <Badge variant="warning">待付款</Badge>}
+                      {relatedBill.status === 'refunded' && <Badge variant="default">已退款</Badge>}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">已收金额</span>
+                    <span className="text-green-400 font-mono font-medium">
+                      {formatCurrency(relatedBill.paidAmount || 0)}
+                    </span>
+                  </div>
+                  {relatedBill.status !== 'paid' && relatedBill.status !== 'refunded' && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-gray-400">未收金额</span>
+                      <span className="text-red-400 font-mono font-medium">
+                        {formatCurrency(Math.max(0, relatedBill.actualAmount - (relatedBill.paidAmount || 0)))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {relatedBill.paymentRecords && relatedBill.paymentRecords.length > 0 && (
+                  <div className="pt-2 mt-2 border-t border-darkroom-border">
+                    <div className="flex items-center gap-1.5 text-gray-400 text-sm mb-2">
+                      <History className="w-3.5 h-3.5" />
+                      <span>收款记录（{relatedBill.paymentRecords.length}次）</span>
+                    </div>
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                      {relatedBill.paymentRecords
+                        .slice()
+                        .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
+                        .map((record) => (
+                        <div key={record.id} className="flex items-center justify-between text-sm">
+                          <div>
+                            <span className="text-film-cream">{record.paymentMethod}</span>
+                            <span className="text-xs text-gray-500 font-mono ml-2">
+                              {formatDateTime(new Date(record.paidAt))}
+                              {record.notes && ` · ${record.notes}`}
+                            </span>
+                          </div>
+                          <span className="text-green-400 font-mono">+{formatCurrency(record.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex items-center justify-between pt-3 mt-3 border-t border-darkroom-border">
