@@ -13,10 +13,12 @@ const HOUR_HEIGHT = 60;
 
 interface WeekViewProps {
   workstationId: string;
+  filterSearch?: string;
+  filterBillStatus?: string;
 }
 
-const WeekView = ({ workstationId }: WeekViewProps) => {
-  const { bookings } = useAppStore();
+const WeekView = ({ workstationId, filterSearch = '', filterBillStatus = 'all' }: WeekViewProps) => {
+  const { bookings, bills } = useAppStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
@@ -69,13 +71,27 @@ const WeekView = ({ workstationId }: WeekViewProps) => {
     return { top: Math.max(0, top), height: Math.max(20, height) };
   };
 
-  const getDayBookings = (date: Date) => {
-    return bookings.filter(booking => {
+  const getDayBookings = useMemo(() => {
+    return (date: Date) => bookings.filter(booking => {
       if (booking.status === 'cancelled') return false;
       if (booking.workstationId !== workstationId) return false;
-      return isSameDate(new Date(booking.startTime), date);
+      if (!isSameDate(new Date(booking.startTime), date)) return false;
+
+      if (filterSearch.trim()) {
+        const q = filterSearch.trim().toLowerCase();
+        const nameMatch = booking.customerName.toLowerCase().includes(q);
+        const phoneMatch = (booking.customerPhone || '').toLowerCase().includes(q);
+        if (!nameMatch && !phoneMatch) return false;
+      }
+
+      if (filterBillStatus !== 'all') {
+        const bill = bills.find(b => b.bookingId === booking.id);
+        if (!bill || bill.status !== filterBillStatus) return false;
+      }
+
+      return true;
     });
-  };
+  }, [bookings, workstationId, filterSearch, filterBillStatus, bills]);
 
   const isToday = (date: Date) => isSameDate(date, new Date());
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { Workstation, RateTier, Booking, Bill, ProcessingTask } from '@/types';
-import { generateId, getDefaultRateTiers, getDefaultWorkstations, calculateFee } from '@/utils/billing';
+import { Workstation, RateTier, Booking, Bill, ProcessingTask, Customer, PaymentRecord } from '@/types';
+import { generateId, getDefaultRateTiers, getDefaultWorkstations, calculateFee, checkTiersOverlap } from '@/utils/billing';
 import { checkBookingConflict } from '@/utils/booking';
 import { addDays } from 'date-fns';
 
@@ -11,14 +11,20 @@ interface AppState {
   bookings: Booking[];
   bills: Bill[];
   processingTasks: ProcessingTask[];
+  customers: Customer[];
   
   addWorkstation: (ws: Omit<Workstation, 'id' | 'createdAt'>) => void;
   updateWorkstation: (id: string, data: Partial<Workstation>) => void;
   deleteWorkstation: (id: string) => void;
   
-  addRateTier: (tier: Omit<RateTier, 'id'>) => void;
-  updateRateTier: (id: string, data: Partial<RateTier>) => void;
+  addRateTier: (tier: Omit<RateTier, 'id'>) => { success: boolean; error?: string };
+  updateRateTier: (id: string, data: Partial<RateTier>) => { success: boolean; error?: string };
   deleteRateTier: (id: string) => void;
+  
+  addCustomer: (customer: Omit<Customer, 'id' | 'createdAt'>) => Customer;
+  updateCustomer: (id: string, data: Partial<Customer>) => void;
+  deleteCustomer: (id: string) => void;
+  upsertCustomer: (name: string, phone: string, notes?: string) => Customer;
   
   createBooking: (booking: Omit<Booking, 'id' | 'createdAt' | 'totalAmount' | 'feeBreakdown'>) => { 
     success: boolean; 
@@ -39,6 +45,12 @@ interface AppState {
     discountType: 'amount' | 'percent',
     discountValue: number
   ) => { success: boolean; error?: string };
+  addPaymentToBill: (
+    id: string,
+    amount: number,
+    paymentMethod: string,
+    notes?: string
+  ) => { success: boolean; error?: string; remaining?: number };
   payBill: (id: string, paymentMethod: string) => void;
   refundBill: (id: string) => void;
   
@@ -108,10 +120,20 @@ const createMockBills = (): Bill[] => {
       totalAmount: 240,
       discount: 0,
       actualAmount: 240,
+      paidAmount: 240,
       status: 'paid',
       createdAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
       paidAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
       paymentMethod: '微信支付',
+      paymentRecords: [
+        {
+          id: 'pay-1',
+          billId: 'bill-1',
+          amount: 240,
+          paymentMethod: '微信支付',
+          paidAt: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000),
+        }
+      ]
     },
     {
       id: 'bill-2',
@@ -119,11 +141,53 @@ const createMockBills = (): Bill[] => {
       totalAmount: 480,
       discount: 0,
       actualAmount: 480,
-      status: 'unpaid',
+      paidAmount: 200,
+      status: 'partial',
       createdAt: new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000),
+      paymentRecords: [
+        {
+          id: 'pay-2',
+          billId: 'bill-2',
+          amount: 200,
+          paymentMethod: '现金',
+          paidAt: new Date(now.getTime() - 0.5 * 24 * 60 * 60 * 1000),
+          notes: '定金',
+        }
+      ]
     },
   ];
 };
+
+const createMockCustomers = (): Customer[] => [
+  {
+    id: 'cust-1',
+    name: '张三',
+    phone: '13800138001',
+    notes: '老客户，偏好黑白胶片',
+    createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+  },
+  {
+    id: 'cust-2',
+    name: '李四',
+    phone: '13800138002',
+    notes: '常拍彩色反转片',
+    createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
+  },
+  {
+    id: 'cust-3',
+    name: '王五',
+    phone: '13800138003',
+    notes: '',
+    createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+  },
+  {
+    id: 'cust-4',
+    name: '赵六',
+    phone: '13800138004',
+    notes: '',
+    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+  },
+];
 
 const createMockTasks = (): ProcessingTask[] => {
   const now = new Date();
@@ -176,6 +240,7 @@ export const useAppStore = create<AppState>()(
       bookings: createMockBookings(),
       bills: createMockBills(),
       processingTasks: createMockTasks(),
+      customers: createMockCustomers(),
 
       addWorkstation: (ws) => {
         const newWs: Workstation = {
@@ -203,6 +268,17 @@ export const useAppStore = create<AppState>()(
       },
 
       addRateTier: (tier) => {
+        const { rateTiers } = get();
+        const temp = [...rateTiers, { ...tier, id: generateId() }];
+        const overlap = checkTiersOverlap(temp);
+        if (overlap.hasOverlap) {
+          return {
+            success: false,
+            error: overlap.conflictInfo
+              ? `保存失败：档位"${overlap.conflictInfo.tier1}"与"${overlap.conflictInfo.tier2}"在时段${overlap.conflictInfo.overlapRange}存在重叠`
+              : '保存失败：费率时段存在重叠',
+          };
+        }
         const newTier: RateTier = {
           ...tier,
           id: generateId(),
@@ -210,20 +286,97 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           rateTiers: [...state.rateTiers, newTier],
         }));
+        return { success: true };
       },
 
       updateRateTier: (id, data) => {
+        const { rateTiers } = get();
+        const temp = rateTiers.map(t => t.id === id ? { ...t, ...data } : t);
+        const overlap = checkTiersOverlap(temp, id);
+        if (overlap.hasOverlap) {
+          return {
+            success: false,
+            error: overlap.conflictInfo
+              ? `保存失败：档位"${overlap.conflictInfo.tier1}"与"${overlap.conflictInfo.tier2}"在时段${overlap.conflictInfo.overlapRange}存在重叠`
+              : '保存失败：费率时段存在重叠',
+          };
+        }
         set((state) => ({
           rateTiers: state.rateTiers.map((tier) =>
             tier.id === id ? { ...tier, ...data } : tier
           ),
         }));
+        return { success: true };
       },
 
       deleteRateTier: (id) => {
         set((state) => ({
           rateTiers: state.rateTiers.filter((tier) => tier.id !== id),
         }));
+      },
+
+      addCustomer: (customer) => {
+        const newCustomer: Customer = {
+          ...customer,
+          id: generateId(),
+          createdAt: new Date(),
+        };
+        set((state) => ({
+          customers: [...state.customers, newCustomer],
+        }));
+        return newCustomer;
+      },
+
+      updateCustomer: (id, data) => {
+        set((state) => ({
+          customers: state.customers.map(c => c.id === id ? { ...c, ...data } : c),
+        }));
+      },
+
+      deleteCustomer: (id) => {
+        set((state) => ({
+          customers: state.customers.filter(c => c.id !== id),
+        }));
+      },
+
+      upsertCustomer: (name, phone, notes) => {
+        const { customers } = get();
+        const trimmedName = name.trim();
+        const trimmedPhone = phone.trim();
+
+        let existing = customers.find(
+          c => c.phone && trimmedPhone && c.phone === trimmedPhone
+        );
+        if (!existing) {
+          existing = customers.find(
+            c => c.name === trimmedName
+          );
+        }
+
+        if (existing) {
+          const needUpdate =
+            (notes && notes.trim() && !existing.notes) ||
+            (trimmedPhone && !existing.phone) ||
+            (notes && existing.notes !== notes.trim());
+          if (needUpdate) {
+            const updated = {
+              ...existing,
+              phone: trimmedPhone || existing.phone,
+              notes: notes?.trim() || existing.notes,
+            };
+            set((state) => ({
+              customers: state.customers.map(c => c.id === existing!.id ? updated : c),
+            }));
+            return updated;
+          }
+          return existing;
+        }
+
+        return get().addCustomer({
+          name: trimmedName,
+          phone: trimmedPhone,
+          notes: notes?.trim() || '',
+        });
       },
 
       createBooking: (bookingData) => {
@@ -263,14 +416,22 @@ export const useAppStore = create<AppState>()(
           bookings: [...state.bookings, newBooking],
         }));
 
+        get().upsertCustomer(
+          bookingData.customerName,
+          bookingData.customerPhone || '',
+          bookingData.notes
+        );
+
         const newBill: Bill = {
           id: generateId(),
           bookingId: newBooking.id,
           totalAmount: feeResult.totalAmount,
           discount: 0,
           actualAmount: feeResult.totalAmount,
+          paidAmount: 0,
           status: 'unpaid',
           createdAt: new Date(),
+          paymentRecords: [],
         };
 
         set((state) => ({
@@ -347,6 +508,9 @@ export const useAppStore = create<AppState>()(
                     totalAmount: newTotal,
                     discount,
                     actualAmount: Math.max(0, Math.round((newTotal - discount) * 100) / 100),
+                    status: b.paidAmount === 0 ? 'unpaid' :
+                            b.paidAmount >= Math.max(0, Math.round((newTotal - discount) * 100) / 100) ? 'paid' :
+                            'partial',
                   }
                 : b
             );
@@ -382,6 +546,8 @@ export const useAppStore = create<AppState>()(
 
       addBill: (bill) => {
         const newBill: Bill = {
+          paidAmount: 0,
+          paymentRecords: [],
           ...bill,
           id: generateId(),
           createdAt: new Date(),
@@ -405,8 +571,8 @@ export const useAppStore = create<AppState>()(
         if (!bill) {
           return { success: false, error: '账单不存在' };
         }
-        if (bill.status !== 'unpaid') {
-          return { success: false, error: '只有待付款账单可以修改优惠' };
+        if (bill.status === 'paid' || bill.status === 'refunded') {
+          return { success: false, error: '已付款或已退款的账单无法修改优惠' };
         }
         if (discountValue < 0) {
           return { success: false, error: '优惠值不能为负数' };
@@ -423,11 +589,14 @@ export const useAppStore = create<AppState>()(
         }
 
         const actualAmount = Math.max(0, Math.round((bill.totalAmount - discount) * 100) / 100);
+        const paidAmount = bill.paidAmount || 0;
+        const status = paidAmount === 0 ? 'unpaid' :
+                       paidAmount >= actualAmount ? 'paid' : 'partial';
 
         set((state) => ({
           bills: state.bills.map(b =>
             b.id === id
-              ? { ...b, discount, discountType, discountValue, actualAmount }
+              ? { ...b, discount, discountType, discountValue, actualAmount, status }
               : b
           ),
         }));
@@ -435,14 +604,72 @@ export const useAppStore = create<AppState>()(
         return { success: true };
       },
 
-      payBill: (id, paymentMethod) => {
+      addPaymentToBill: (id, amount, paymentMethod, notes) => {
+        const { bills } = get();
+        const bill = bills.find(b => b.id === id);
+        if (!bill) {
+          return { success: false, error: '账单不存在' };
+        }
+        if (bill.status === 'refunded') {
+          return { success: false, error: '已退款账单不能收款' };
+        }
+        if (amount <= 0) {
+          return { success: false, error: '收款金额必须大于0' };
+        }
+
+        const remaining = Math.max(0, bill.actualAmount - (bill.paidAmount || 0));
+        if (amount > remaining + 0.001) {
+          return { success: false, error: `收款金额不能超过待付金额 ¥${remaining.toFixed(2)}` };
+        }
+
+        const newPaidAmount = Math.round(((bill.paidAmount || 0) + amount) * 100) / 100;
+        const record: PaymentRecord = {
+          id: generateId(),
+          billId: id,
+          amount,
+          paymentMethod,
+          paidAt: new Date(),
+          notes,
+        };
+
+        const newStatus = newPaidAmount >= bill.actualAmount - 0.001 ? 'paid' : 'partial';
+        const paidAt = newStatus === 'paid' ? new Date() : bill.paidAt;
+
         set((state) => ({
-          bills: state.bills.map((bill) =>
-            bill.id === id
-              ? { ...bill, status: 'paid' as const, paidAt: new Date(), paymentMethod }
-              : bill
+          bills: state.bills.map(b =>
+            b.id === id
+              ? {
+                  ...b,
+                  paidAmount: newPaidAmount,
+                  status: newStatus,
+                  paidAt,
+                  paymentMethod: newStatus === 'paid' ? paymentMethod : b.paymentMethod,
+                  paymentRecords: [...(b.paymentRecords || []), record],
+                }
+              : b
           ),
         }));
+
+        return { success: true, remaining: Math.max(0, bill.actualAmount - newPaidAmount) };
+      },
+
+      payBill: (id, paymentMethod) => {
+        const { bills } = get();
+        const bill = bills.find(b => b.id === id);
+        if (bill) {
+          const remaining = Math.max(0, bill.actualAmount - (bill.paidAmount || 0));
+          if (remaining > 0) {
+            get().addPaymentToBill(id, remaining, paymentMethod, '一次性全额支付');
+          } else {
+            set((state) => ({
+              bills: state.bills.map((b) =>
+                b.id === id
+                  ? { ...b, status: 'paid' as const, paidAt: new Date(), paymentMethod }
+                  : b
+              ),
+            }));
+          }
+        }
       },
 
       refundBill: (id) => {
@@ -496,6 +723,7 @@ export const useAppStore = create<AppState>()(
           bookings: createMockBookings(),
           bills: createMockBills(),
           processingTasks: createMockTasks(),
+          customers: createMockCustomers(),
         });
       },
     }),

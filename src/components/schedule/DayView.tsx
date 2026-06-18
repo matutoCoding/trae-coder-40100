@@ -12,10 +12,12 @@ const HOUR_HEIGHT = 50;
 
 interface DayViewProps {
   workstationId: string;
+  filterSearch?: string;
+  filterBillStatus?: string;
 }
 
-const DayView = ({ workstationId }: DayViewProps) => {
-  const { bookings, workstations } = useAppStore();
+const DayView = ({ workstationId, filterSearch = '', filterBillStatus = 'all' }: DayViewProps) => {
+  const { bookings, workstations, bills } = useAppStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showBookingForm, setShowBookingForm] = useState(false);
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
@@ -71,9 +73,23 @@ const DayView = ({ workstationId }: DayViewProps) => {
       const dayEnd = new Date(currentDate);
       dayEnd.setHours(24, 0, 0, 0);
 
-      return start < dayEnd && end > dayStart;
+      if (!(start < dayEnd && end > dayStart)) return false;
+
+      if (filterSearch.trim()) {
+        const q = filterSearch.trim().toLowerCase();
+        const nameMatch = booking.customerName.toLowerCase().includes(q);
+        const phoneMatch = (booking.customerPhone || '').toLowerCase().includes(q);
+        if (!nameMatch && !phoneMatch) return false;
+      }
+
+      if (filterBillStatus !== 'all') {
+        const bill = bills.find(b => b.bookingId === booking.id);
+        if (!bill || bill.status !== filterBillStatus) return false;
+      }
+
+      return true;
     });
-  }, [bookings, workstationId, currentDate]);
+  }, [bookings, workstationId, currentDate, filterSearch, filterBillStatus, bills]);
 
   const getBookingDisplay = (booking: any) => {
     const start = new Date(booking.startTime);

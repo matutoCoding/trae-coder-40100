@@ -25,7 +25,7 @@ const BookingFormModal = ({
   defaultEndTime,
   editingBookingId,
 }: BookingFormModalProps) => {
-  const { workstations, rateTiers, createBooking, bookings, rescheduleBooking } = useAppStore();
+  const { workstations, rateTiers, createBooking, bookings, rescheduleBooking, customers } = useAppStore();
   const editingBooking = editingBookingId ? bookings.find(b => b.id === editingBookingId) : null;
   
   const activeWorkstations = useMemo(
@@ -291,18 +291,40 @@ const BookingFormModal = ({
             <input
               type="text"
               className="input-dark"
-              placeholder="请输入客户姓名"
+              list="customer-names"
+              placeholder="请输入客户姓名，可从已有客户中选择"
               value={formData.customerName}
-              onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+              onChange={(e) => {
+                const val = e.target.value;
+                setFormData(prev => {
+                  const matched = customers.find(c => c.name === val.trim());
+                  if (matched) {
+                    return {
+                      ...prev,
+                      customerName: val,
+                      customerPhone: prev.customerPhone || matched.phone,
+                      notes: prev.notes || matched.notes,
+                    };
+                  }
+                  return { ...prev, customerName: val };
+                });
+              }}
               disabled={!!editingBookingId}
             />
+            <datalist id="customer-names">
+              {customers.map(c => (
+                <option key={c.id} value={c.name}>
+                  {c.phone ? `${c.name} (${c.phone})` : c.name}
+                </option>
+              ))}
+            </datalist>
           </div>
           <div>
             <label className="label-dark">联系电话</label>
             <input
               type="tel"
               className="input-dark"
-              placeholder="请输入联系电话"
+              placeholder="选择客户后自动带出"
               value={formData.customerPhone}
               onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
               disabled={!!editingBookingId}
@@ -315,7 +337,7 @@ const BookingFormModal = ({
           <textarea
             className="input-dark resize-none"
             rows={2}
-            placeholder="可选备注信息"
+            placeholder="选择客户后可自动带出备注"
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
             disabled={!!editingBookingId}

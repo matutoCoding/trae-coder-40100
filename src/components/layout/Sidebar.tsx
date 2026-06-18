@@ -6,12 +6,14 @@ import {
   DollarSign, 
   FileText, 
   Film,
-  Camera
+  Camera,
+  Users
 } from 'lucide-react';
 
 const navItems = [
   { path: '/dashboard', label: '工作台', icon: LayoutDashboard },
   { path: '/schedule', label: '工位排期', icon: CalendarClock },
+  { path: '/customers', label: '客户档案', icon: Users },
   { path: '/workstations', label: '工位管理', icon: MonitorCog },
   { path: '/rates', label: '费率管理', icon: DollarSign },
   { path: '/bills', label: '账单中心', icon: FileText },

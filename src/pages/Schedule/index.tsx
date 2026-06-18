@@ -4,7 +4,7 @@ import WeekView from '@/components/schedule/WeekView';
 import DayView from '@/components/schedule/DayView';
 import { useAppStore } from '@/store/useAppStore';
 import Badge from '@/components/ui/Badge';
-import { MonitorCog, CalendarDays, Calendar } from 'lucide-react';
+import { MonitorCog, CalendarDays, Calendar, Search, Filter, X } from 'lucide-react';
 
 const Schedule = () => {
   const { workstations } = useAppStore();
@@ -16,6 +16,8 @@ const Schedule = () => {
     activeWorkstations[0]?.id || ''
   );
   const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
+  const [filterSearch, setFilterSearch] = useState('');
+  const [filterBillStatus, setFilterBillStatus] = useState('all');
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -76,6 +78,56 @@ const Schedule = () => {
         }
       />
 
+      <div className="card-dark p-4 mb-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 text-gray-400">
+            <Filter className="w-4 h-4" />
+            <span className="text-sm">筛选预约：</span>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+            <input
+              type="text"
+              className="input-dark pl-9 pr-8 py-1.5 text-sm w-60"
+              placeholder="客户姓名或手机号"
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+            />
+            {filterSearch && (
+              <button
+                onClick={() => setFilterSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 hover:bg-darkroom-hover rounded text-gray-500 hover:text-gray-300"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <select
+            className="input-dark py-1.5 text-sm w-36"
+            value={filterBillStatus}
+            onChange={(e) => setFilterBillStatus(e.target.value)}
+          >
+            <option value="all">全部账单状态</option>
+            <option value="unpaid">待付款</option>
+            <option value="partial">部分收款</option>
+            <option value="paid">已付款</option>
+            <option value="refunded">已退款</option>
+          </select>
+          {(filterSearch || filterBillStatus !== 'all') && (
+            <button
+              onClick={() => {
+                setFilterSearch('');
+                setFilterBillStatus('all');
+              }}
+              className="text-sm text-safelight-amber hover:text-safelight-redLight flex items-center gap-1"
+            >
+              <X className="w-3.5 h-3.5" />
+              清空筛选
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="flex gap-6">
         <div className="w-64 flex-shrink-0">
           <div className="card-dark p-4">
@@ -134,8 +186,16 @@ const Schedule = () => {
         <div className="flex-1 min-w-0">
           {selectedWorkstationId ? (
             viewMode === 'day' 
-              ? <DayView workstationId={selectedWorkstationId} />
-              : <WeekView workstationId={selectedWorkstationId} />
+              ? <DayView 
+                  workstationId={selectedWorkstationId} 
+                  filterSearch={filterSearch}
+                  filterBillStatus={filterBillStatus}
+                />
+              : <WeekView 
+                  workstationId={selectedWorkstationId}
+                  filterSearch={filterSearch}
+                  filterBillStatus={filterBillStatus}
+                />
           ) : (
             <div className="card-dark p-12 text-center">
               <MonitorCog className="w-16 h-16 mx-auto mb-4 text-gray-600" />

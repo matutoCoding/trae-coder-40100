@@ -49,11 +49,13 @@ export interface Bill {
   discountType?: 'amount' | 'percent';
   discountValue?: number;
   actualAmount: number;
-  status: 'unpaid' | 'paid' | 'refunded';
+  paidAmount: number;
+  status: 'unpaid' | 'partial' | 'paid' | 'refunded';
   createdAt: Date;
   paidAt?: Date;
   paymentMethod?: string;
   notes?: string;
+  paymentRecords?: PaymentRecord[];
 }
 
 export type ProcessingStatus = 'pending' | 'processing' | 'completed' | 'picked_up';
@@ -71,6 +73,24 @@ export interface ProcessingTask {
   createdAt: Date;
   completedAt?: Date;
   pickedUpAt?: Date;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  notes: string;
+  createdAt: Date;
+}
+
+export interface PaymentRecord {
+  id: string;
+  billId: string;
+  amount: number;
+  paymentMethod: string;
+  paidAt: Date;
+  operator?: string;
+  notes?: string;
 }
 
 export interface ConflictResult {

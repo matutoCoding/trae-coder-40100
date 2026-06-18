@@ -17,17 +17,24 @@ import {
   ChevronDown,
   Percent,
   Tag,
-  Calculator
+  Calculator,
+  Plus,
+  History
 } from 'lucide-react';
 
 const Bills = () => {
-  const { bills, bookings, workstations, payBill, refundBill, applyDiscountToBill } = useAppStore();
+  const { bills, bookings, workstations, payBill, refundBill, applyDiscountToBill, addPaymentToBill } = useAppStore();
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPayModal, setShowPayModal] = useState(false);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [showPartialPayModal, setShowPartialPayModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('现金');
+  const [partialPayAmount, setPartialPayAmount] = useState('');
+  const [partialPayMethod, setPartialPayMethod] = useState('现金');
+  const [partialPayNotes, setPartialPayNotes] = useState('');
+  const [partialPayError, setPartialPayError] = useState('');
   const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
   const [discountValue, setDiscountValue] = useState<string>('0');
   const [discountError, setDiscountError] = useState('');
@@ -45,6 +52,8 @@ const Bills = () => {
     switch (status) {
       case 'unpaid':
         return <Badge variant="warning">待付款</Badge>;
+      case 'partial':
+        return <Badge variant="purple">部分收款</Badge>;
       case 'paid':
         return <Badge variant="success">已付款</Badge>;
       case 'refunded':
@@ -209,6 +218,7 @@ const Bills = () => {
               >
                 <option value="all">全部状态</option>
                 <option value="unpaid">待付款</option>
+                <option value="partial">部分收款</option>
                 <option value="paid">已付款</option>
                 <option value="refunded">已退款</option>
               </select>
@@ -255,20 +265,26 @@ const Bills = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {bill.discount > 0 ? (
-                        <div className="flex flex-col">
-                          <span className="text-safelight-amber font-mono font-medium">
-                            {formatCurrency(bill.actualAmount)}
-                          </span>
-                          <span className="text-gray-500 text-xs line-through font-mono">
-                            原价 {formatCurrency(bill.totalAmount)}
-                          </span>
-                        </div>
-                      ) : (
+                      <div className="flex flex-col gap-0.5">
                         <span className="text-safelight-amber font-mono font-medium">
                           {formatCurrency(bill.actualAmount)}
                         </span>
-                      )}
+                        {(bill.paidAmount || 0) > 0 && (
+                          <span className="text-xs text-green-400 font-mono">
+                            已收 {formatCurrency(bill.paidAmount || 0)}
+                          </span>
+                        )}
+                        {bill.discount > 0 && (
+                          <span className="text-xs text-gray-500 line-through font-mono">
+                            原价 {formatCurrency(bill.totalAmount)}
+                          </span>
+                        )}
+                        {bill.status !== 'paid' && bill.status !== 'refunded' && (bill.paidAmount || 0) < bill.actualAmount && (
+                          <span className="text-xs text-red-400 font-mono">
+                            未收 {formatCurrency(Math.max(0, bill.actualAmount - (bill.paidAmount || 0)))}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {getStatusBadge(bill.status)}
@@ -386,26 +402,72 @@ const Bills = () => {
               </div>
             )}
 
-            <div className="p-4 bg-safelight-red/10 rounded-lg border border-safelight-red/30">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-gray-400">账单金额</span>
+            <div className="p-4 bg-safelight-red/10 rounded-lg border border-safelight-red/30 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-gray-400">账单原价</span>
                 <span className="text-film-cream font-mono">{formatCurrency(selectedBill.totalAmount)}</span>
               </div>
               {selectedBill.discount > 0 && (
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-gray-400">优惠</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">
+                    优惠 {selectedBill.discountType === 'percent' ? `(${selectedBill.discountValue}%)` : ''}
+                  </span>
                   <span className="text-green-400 font-mono">-{formatCurrency(selectedBill.discount)}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between pt-2 border-t border-safelight-red/20">
-                <span className="text-film-cream font-medium">实付金额</span>
-                <span className="text-2xl font-bold text-safelight-amber font-mono">
+              <div className="flex items-center justify-between pt-1 border-t border-safelight-red/20">
+                <span className="text-gray-300 font-medium">应付金额</span>
+                <span className="text-xl font-bold text-safelight-amber font-mono">
                   {formatCurrency(selectedBill.actualAmount)}
                 </span>
               </div>
+              {((selectedBill.paidAmount || 0) > 0 || selectedBill.status === 'partial') && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">已收金额</span>
+                    <span className="text-green-400 font-mono font-medium">
+                      {formatCurrency(selectedBill.paidAmount || 0)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">未收金额</span>
+                    <span className="text-red-400 font-mono font-medium">
+                      {formatCurrency(Math.max(0, selectedBill.actualAmount - (selectedBill.paidAmount || 0)))}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
 
-            {selectedBill.paymentMethod && (
+            {selectedBill.paymentRecords && selectedBill.paymentRecords.length > 0 && (
+              <div className="p-4 bg-darkroom-bg rounded-lg">
+                <div className="flex items-center gap-2 text-gray-400 text-sm mb-3">
+                  <History className="w-4 h-4" />
+                  <span>收款记录（{selectedBill.paymentRecords.length}次）</span>
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {selectedBill.paymentRecords
+                    .slice()
+                    .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime())
+                    .map((record, idx) => (
+                    <div key={record.id} className="flex items-center justify-between text-sm py-2 border-b border-darkroom-border last:border-b-0">
+                      <div>
+                        <p className="text-film-cream">{record.paymentMethod}</p>
+                        <p className="text-xs text-gray-500 font-mono">
+                          {formatDateTime(new Date(record.paidAt))}
+                          {record.notes && ` · ${record.notes}`}
+                        </p>
+                      </div>
+                      <span className="text-green-400 font-mono font-medium">
+                        +{formatCurrency(record.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {selectedBill.paymentMethod && selectedBill.status === 'paid' && (
               <div className="flex items-center justify-between text-sm">
                 <span className="text-gray-400">支付方式</span>
                 <span className="text-film-cream">{selectedBill.paymentMethod}</span>
@@ -413,13 +475,13 @@ const Bills = () => {
             )}
             {selectedBill.paidAt && (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-400">支付时间</span>
+                <span className="text-gray-400">结清时间</span>
                 <span className="text-film-cream font-mono">{formatDateTime(new Date(selectedBill.paidAt))}</span>
               </div>
             )}
 
             <div className="flex justify-end gap-3 pt-2">
-              {selectedBill.status === 'unpaid' && (
+              {(selectedBill.status === 'unpaid' || selectedBill.status === 'partial') && (
                 <>
                   <button
                     onClick={openDiscountModal}
@@ -428,11 +490,25 @@ const Bills = () => {
                     <Tag className="w-4 h-4" />
                     设置优惠
                   </button>
+                  <button
+                    onClick={() => {
+                      const remaining = Math.max(0, selectedBill.actualAmount - (selectedBill.paidAmount || 0));
+                      setPartialPayAmount(remaining.toFixed(2));
+                      setPartialPayMethod('现金');
+                      setPartialPayNotes('');
+                      setPartialPayError('');
+                      setShowPartialPayModal(true);
+                    }}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Plus className="w-4 h-4" />
+                    收款
+                  </button>
                   <button 
                     onClick={() => setShowPayModal(true)}
                     className="btn-primary"
                   >
-                    确认付款
+                    一次性结清
                   </button>
                 </>
               )}
@@ -566,9 +642,116 @@ const Bills = () => {
       </Modal>
 
       <Modal
+        isOpen={showPartialPayModal}
+        onClose={() => setShowPartialPayModal(false)}
+        title="登记收款"
+        size="sm"
+      >
+        <div className="space-y-4">
+          {selectedBill && (
+            <>
+              <div className="p-3 bg-darkroom-bg rounded-lg text-sm space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-gray-400">应付金额</span>
+                  <span className="text-film-cream font-mono">{formatCurrency(selectedBill.actualAmount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-400">已收金额</span>
+                  <span className="text-green-400 font-mono">{formatCurrency(selectedBill.paidAmount || 0)}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-darkroom-border">
+                  <span className="text-gray-300">本次最多可收</span>
+                  <span className="text-safelight-amber font-mono font-medium">
+                    {formatCurrency(Math.max(0, selectedBill.actualAmount - (selectedBill.paidAmount || 0)))}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="label-dark">收款金额（元）*</label>
+                <input
+                  type="number"
+                  className="input-dark text-lg font-mono"
+                  min="0.01"
+                  step="0.01"
+                  value={partialPayAmount}
+                  onChange={(e) => setPartialPayAmount(e.target.value)}
+                  placeholder="请输入收款金额"
+                />
+              </div>
+
+              <div>
+                <label className="label-dark">收款方式</label>
+                <select
+                  className="input-dark"
+                  value={partialPayMethod}
+                  onChange={(e) => setPartialPayMethod(e.target.value)}
+                >
+                  <option value="现金">现金</option>
+                  <option value="微信支付">微信支付</option>
+                  <option value="支付宝">支付宝</option>
+                  <option value="银行卡">银行卡</option>
+                  <option value="其他">其他</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="label-dark">备注</label>
+                <input
+                  type="text"
+                  className="input-dark"
+                  placeholder="如定金、尾款等"
+                  value={partialPayNotes}
+                  onChange={(e) => setPartialPayNotes(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+
+          {partialPayError && (
+            <p className="text-red-400 text-sm">{partialPayError}</p>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button 
+              className="btn-secondary flex-1"
+              onClick={() => setShowPartialPayModal(false)}
+            >
+              取消
+            </button>
+            <button 
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+              onClick={() => {
+                if (!selectedBillId) return;
+                const amt = Number(partialPayAmount);
+                if (!amt || amt <= 0) {
+                  setPartialPayError('请输入有效的收款金额');
+                  return;
+                }
+                const result = addPaymentToBill(
+                  selectedBillId,
+                  Math.round(amt * 100) / 100,
+                  partialPayMethod,
+                  partialPayNotes
+                );
+                if (!result.success) {
+                  setPartialPayError(result.error || '收款失败');
+                  return;
+                }
+                setShowPartialPayModal(false);
+              }}
+            >
+              <CheckCircle className="w-4 h-4" />
+              确认收款
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={showPayModal}
         onClose={() => setShowPayModal(false)}
-        title="确认付款"
+        title="确认全额结清"
         size="sm"
       >
         <div className="space-y-4">
@@ -587,9 +770,17 @@ const Bills = () => {
                 </div>
               </>
             )}
-            <p className="text-gray-400 text-sm mt-2 mb-1">应付金额</p>
+            {selectedBill && (selectedBill.paidAmount || 0) > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-400">已收</span>
+                <span className="text-green-400">{formatCurrency(selectedBill.paidAmount || 0)}</span>
+              </div>
+            )}
+            <p className="text-gray-400 text-sm mt-2 mb-1">本次应收</p>
             <p className="text-3xl font-bold text-safelight-amber font-mono">
-              {selectedBill ? formatCurrency(selectedBill.actualAmount) : '¥0.00'}
+              {selectedBill 
+                ? formatCurrency(Math.max(0, selectedBill.actualAmount - (selectedBill.paidAmount || 0)))
+                : '¥0.00'}
             </p>
           </div>
 

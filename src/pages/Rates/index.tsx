@@ -109,9 +109,17 @@ const Rates = () => {
     setFormError('');
     
     if (editingId) {
-      updateRateTier(editingId, formData);
+      const result = updateRateTier(editingId, formData);
+      if (!result.success) {
+        setFormError(result.error || '保存失败');
+        return;
+      }
     } else {
-      addRateTier(formData);
+      const result = addRateTier(formData);
+      if (!result.success) {
+        setFormError(result.error || '保存失败');
+        return;
+      }
     }
     setShowForm(false);
   };
