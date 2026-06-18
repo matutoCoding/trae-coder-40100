@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Courier New', monospace;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #F5F5DC;
+  background-color: #0f0f0f;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #0f0f0f;
+  background-image: 
+    radial-gradient(ellipse at 20% 20%, rgba(139, 0, 0, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(212, 165, 116, 0.05) 0%, transparent 50%);
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-safelight-red text-white rounded-lg transition-all duration-300;
+    @apply hover:bg-safelight-redLight hover:shadow-safelight-red;
+    @apply focus:outline-none focus:ring-2 focus:ring-safelight-red focus:ring-opacity-50;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-darkroom-card text-film-cream rounded-lg border border-darkroom-border;
+    @apply hover:bg-darkroom-hover hover:border-safelight-amber transition-all duration-300;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-red-900 text-white rounded-lg border border-red-700;
+    @apply hover:bg-red-800 transition-all duration-300;
+  }
+
+  .card-dark {
+    @apply bg-darkroom-card border border-darkroom-border rounded-xl shadow-card-dark;
+  }
+
+  .input-dark {
+    @apply w-full px-3 py-2 bg-darkroom-bg border border-darkroom-border rounded-lg;
+    @apply text-film-cream placeholder-gray-500;
+    @apply focus:outline-none focus:border-safelight-red focus:ring-1 focus:ring-safelight-red;
+    @apply transition-all duration-200;
+  }
+
+  .label-dark {
+    @apply block text-sm font-medium text-film-cream mb-1;
+  }
+
+  .safelight-glow {
+    box-shadow: 0 0 20px rgba(139, 0, 0, 0.3), 0 0 40px rgba(139, 0, 0, 0.1);
+  }
+
+  .amber-glow {
+    box-shadow: 0 0 20px rgba(212, 165, 116, 0.3), 0 0 40px rgba(212, 165, 116, 0.1);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a #1a1a1a;
+}
