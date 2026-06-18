@@ -14,16 +14,23 @@ import {
   RefreshCw,
   CheckCircle,
   XCircle,
-  ChevronDown
+  ChevronDown,
+  Percent,
+  Tag,
+  Calculator
 } from 'lucide-react';
 
 const Bills = () => {
-  const { bills, bookings, workstations, payBill, refundBill } = useAppStore();
+  const { bills, bookings, workstations, payBill, refundBill, applyDiscountToBill } = useAppStore();
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPayModal, setShowPayModal] = useState(false);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('现金');
+  const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
+  const [discountValue, setDiscountValue] = useState<string>('0');
+  const [discountError, setDiscountError] = useState('');
 
   const getBookingForBill = (billId: string) => {
     return bookings.find(b => b.id === billId);
@@ -67,9 +74,6 @@ const Bills = () => {
     return true;
   }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const selectedBill = bills.find(b => b.id === selectedBillId);
-  const selectedBooking = selectedBill ? getBookingForBill(selectedBill.bookingId) : null;
-
   const totalUnpaid = bills
     .filter(b => b.status === 'unpaid')
     .reduce((sum, b) => sum + b.actualAmount, 0);
@@ -90,6 +94,38 @@ const Bills = () => {
       refundBill(selectedBillId);
     }
   };
+
+  const openDiscountModal = () => {
+    if (selectedBill) {
+      if (selectedBill.discountType && selectedBill.discountValue !== undefined) {
+        setDiscountType(selectedBill.discountType);
+        setDiscountValue(selectedBill.discountValue.toString());
+      } else {
+        setDiscountType('amount');
+        setDiscountValue('0');
+      }
+      setDiscountError('');
+      setShowDiscountModal(true);
+    }
+  };
+
+  const handleSaveDiscount = () => {
+    if (!selectedBillId) return;
+    const val = Number(discountValue);
+    if (isNaN(val) || val < 0) {
+      setDiscountError('请输入有效的优惠数值');
+      return;
+    }
+    const result = applyDiscountToBill(selectedBillId, discountType, val);
+    if (!result.success) {
+      setDiscountError(result.error || '设置优惠失败');
+      return;
+    }
+    setShowDiscountModal(false);
+  };
+
+  const selectedBill = bills.find(b => b.id === selectedBillId);
+  const selectedBooking = selectedBill ? getBookingForBill(selectedBill.bookingId) : null;
 
   return (
     <div>
@@ -219,9 +255,20 @@ const Bills = () => {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="text-safelight-amber font-mono font-medium">
-                        {formatCurrency(bill.actualAmount)}
-                      </span>
+                      {bill.discount > 0 ? (
+                        <div className="flex flex-col">
+                          <span className="text-safelight-amber font-mono font-medium">
+                            {formatCurrency(bill.actualAmount)}
+                          </span>
+                          <span className="text-gray-500 text-xs line-through font-mono">
+                            原价 {formatCurrency(bill.totalAmount)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-safelight-amber font-mono font-medium">
+                          {formatCurrency(bill.actualAmount)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {getStatusBadge(bill.status)}
@@ -373,12 +420,21 @@ const Bills = () => {
 
             <div className="flex justify-end gap-3 pt-2">
               {selectedBill.status === 'unpaid' && (
-                <button 
-                  onClick={() => setShowPayModal(true)}
-                  className="btn-primary"
-                >
-                  确认付款
-                </button>
+                <>
+                  <button
+                    onClick={openDiscountModal}
+                    className="btn-secondary flex items-center gap-2"
+                  >
+                    <Tag className="w-4 h-4" />
+                    设置优惠
+                  </button>
+                  <button 
+                    onClick={() => setShowPayModal(true)}
+                    className="btn-primary"
+                  >
+                    确认付款
+                  </button>
+                </>
               )}
               {selectedBill.status === 'paid' && (
                 <button 
@@ -394,14 +450,144 @@ const Bills = () => {
       </Modal>
 
       <Modal
+        isOpen={showDiscountModal}
+        onClose={() => setShowDiscountModal(false)}
+        title="设置优惠"
+        size="sm"
+      >
+        <div className="space-y-4">
+          {selectedBill && (
+            <div className="p-3 bg-darkroom-bg rounded-lg text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-gray-400">账单原价</span>
+                <span className="text-film-cream font-mono">{formatCurrency(selectedBill.totalAmount)}</span>
+              </div>
+              {selectedBill.discount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-gray-400">当前优惠</span>
+                  <span className="text-green-400 font-mono">-{formatCurrency(selectedBill.discount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1 border-t border-darkroom-border">
+                <span className="text-gray-300">当前实付</span>
+                <span className="text-safelight-amber font-mono font-medium">{formatCurrency(selectedBill.actualAmount)}</span>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="label-dark">优惠方式</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setDiscountType('amount')}
+                className={`p-3 rounded-lg border flex items-center justify-center gap-2 transition-colors ${
+                  discountType === 'amount'
+                    ? 'border-safelight-red bg-safelight-red/10 text-safelight-redLight'
+                    : 'border-darkroom-border bg-darkroom-bg text-gray-400 hover:border-gray-600'
+                }`}
+              >
+                <DollarSign className="w-4 h-4" />
+                固定金额
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiscountType('percent')}
+                className={`p-3 rounded-lg border flex items-center justify-center gap-2 transition-colors ${
+                  discountType === 'percent'
+                    ? 'border-safelight-red bg-safelight-red/10 text-safelight-redLight'
+                    : 'border-darkroom-border bg-darkroom-bg text-gray-400 hover:border-gray-600'
+                }`}
+              >
+                <Percent className="w-4 h-4" />
+                折扣比例
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="label-dark">
+              {discountType === 'amount' ? '优惠金额（元）' : '折扣比例（%）'}
+            </label>
+            <input
+              type="number"
+              className="input-dark"
+              min="0"
+              step={discountType === 'amount' ? '0.01' : '1'}
+              max={discountType === 'percent' ? '100' : undefined}
+              value={discountValue}
+              onChange={(e) => setDiscountValue(e.target.value)}
+              placeholder={discountType === 'amount' ? '例如：20' : '例如：15'}
+            />
+            {discountType === 'percent' && (
+              <p className="text-xs text-gray-500 mt-1">0~100之间，如15表示减免15%</p>
+            )}
+          </div>
+
+          {selectedBill && (
+            <div className="p-3 bg-safelight-amber/10 rounded-lg flex items-center justify-between">
+              <Calculator className="w-4 h-4 text-safelight-amber" />
+              <div className="text-right">
+                <p className="text-xs text-gray-400">优惠后实付</p>
+                <p className="text-xl font-bold text-safelight-amber font-mono">
+                  {formatCurrency(
+                    Math.max(
+                      0,
+                      discountType === 'amount'
+                        ? Math.round((selectedBill.totalAmount - Math.min(Number(discountValue) || 0, selectedBill.totalAmount)) * 100) / 100
+                        : Math.round(selectedBill.totalAmount * (1 - (Number(discountValue) || 0) / 100) * 100) / 100
+                    )
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {discountError && (
+            <p className="text-red-400 text-sm">{discountError}</p>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button 
+              className="btn-secondary flex-1"
+              onClick={() => setShowDiscountModal(false)}
+            >
+              取消
+            </button>
+            <button 
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+              onClick={handleSaveDiscount}
+            >
+              <CheckCircle className="w-4 h-4" />
+              保存优惠
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         isOpen={showPayModal}
         onClose={() => setShowPayModal(false)}
         title="确认付款"
         size="sm"
       >
         <div className="space-y-4">
-          <div className="p-4 bg-safelight-amber/10 rounded-lg text-center">
-            <p className="text-gray-400 text-sm mb-1">应付金额</p>
+          <div className="p-4 bg-safelight-amber/10 rounded-lg text-center space-y-1">
+            {selectedBill && selectedBill.discount > 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">原价</span>
+                  <span className="text-gray-400 line-through">{formatCurrency(selectedBill.totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">
+                    优惠 {selectedBill.discountType === 'percent' ? `(${selectedBill.discountValue}%)` : ''}
+                  </span>
+                  <span className="text-green-400">-{formatCurrency(selectedBill.discount)}</span>
+                </div>
+              </>
+            )}
+            <p className="text-gray-400 text-sm mt-2 mb-1">应付金额</p>
             <p className="text-3xl font-bold text-safelight-amber font-mono">
               {selectedBill ? formatCurrency(selectedBill.actualAmount) : '¥0.00'}
             </p>

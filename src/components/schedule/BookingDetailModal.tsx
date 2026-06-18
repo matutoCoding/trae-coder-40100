@@ -4,7 +4,11 @@ import Badge from '@/components/ui/Badge';
 import { useAppStore } from '@/store/useAppStore';
 import { formatDateTime, formatDuration, diffMinutes } from '@/utils/date';
 import { formatCurrency } from '@/utils/billing';
-import { CalendarDays, User, Phone, Clock, DollarSign, FileText, XCircle, CheckCircle } from 'lucide-react';
+import { 
+  CalendarDays, User, Phone, Clock, DollarSign, FileText, 
+  XCircle, CheckCircle, Edit3 
+} from 'lucide-react';
+import BookingFormModal from './BookingFormModal';
 
 interface BookingDetailModalProps {
   isOpen: boolean;
@@ -13,11 +17,13 @@ interface BookingDetailModalProps {
 }
 
 const BookingDetailModal = ({ isOpen, onClose, bookingId }: BookingDetailModalProps) => {
-  const { bookings, workstations, cancelBooking, completeBooking } = useAppStore();
+  const { bookings, workstations, bills, cancelBooking, completeBooking } = useAppStore();
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
 
   const booking = bookings.find(b => b.id === bookingId);
   const workstation = workstations.find(w => w.id === booking?.workstationId);
+  const relatedBill = booking ? bills.find(b => b.bookingId === booking.id) : null;
 
   if (!booking) return null;
 
@@ -118,12 +124,37 @@ const BookingDetailModal = ({ isOpen, onClose, bookingId }: BookingDetailModalPr
                 </div>
               ))}
             </div>
-            <div className="flex items-center justify-between pt-3 mt-3 border-t border-darkroom-border">
-              <span className="text-gray-400">合计</span>
-              <span className="text-xl font-bold text-safelight-amber font-mono">
-                {formatCurrency(booking.totalAmount)}
-              </span>
-            </div>
+            {relatedBill ? (
+              <div className="mt-3 pt-3 border-t border-darkroom-border space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-400">账单原价</span>
+                  <span className="text-film-cream font-mono">{formatCurrency(relatedBill.totalAmount)}</span>
+                </div>
+                {relatedBill.discount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">
+                      {relatedBill.discountType === 'percent' 
+                        ? `优惠 (${relatedBill.discountValue}%)` 
+                        : '优惠'}
+                    </span>
+                    <span className="text-green-400 font-mono">-{formatCurrency(relatedBill.discount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-gray-300 font-medium">应付金额</span>
+                  <span className="text-xl font-bold text-safelight-amber font-mono">
+                    {formatCurrency(relatedBill.actualAmount)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between pt-3 mt-3 border-t border-darkroom-border">
+                <span className="text-gray-400">合计</span>
+                <span className="text-xl font-bold text-safelight-amber font-mono">
+                  {formatCurrency(booking.totalAmount)}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -140,6 +171,13 @@ const BookingDetailModal = ({ isOpen, onClose, bookingId }: BookingDetailModalPr
         <div className="flex justify-end gap-3 pt-2">
           {booking.status === 'confirmed' && (
             <>
+              <button 
+                onClick={() => setShowReschedule(true)}
+                className="btn-secondary flex items-center gap-2"
+              >
+                <Edit3 className="w-4 h-4" />
+                改期
+              </button>
               <button 
                 onClick={() => setShowCancelConfirm(true)}
                 className="btn-danger flex items-center gap-2"
@@ -187,6 +225,12 @@ const BookingDetailModal = ({ isOpen, onClose, bookingId }: BookingDetailModalPr
           </div>
         </div>
       )}
+
+      <BookingFormModal
+        isOpen={showReschedule}
+        onClose={() => setShowReschedule(false)}
+        editingBookingId={bookingId || undefined}
+      />
     </Modal>
   );
 };

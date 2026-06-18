@@ -1,16 +1,21 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import PageHeader from '@/components/ui/PageHeader';
 import WeekView from '@/components/schedule/WeekView';
+import DayView from '@/components/schedule/DayView';
 import { useAppStore } from '@/store/useAppStore';
 import Badge from '@/components/ui/Badge';
-import { MonitorCog } from 'lucide-react';
+import { MonitorCog, CalendarDays, Calendar } from 'lucide-react';
 
 const Schedule = () => {
   const { workstations } = useAppStore();
-  const activeWorkstations = workstations.filter(w => w.status === 'active');
+  const activeWorkstations = useMemo(
+    () => workstations.filter(w => w.status === 'active'),
+    [workstations]
+  );
   const [selectedWorkstationId, setSelectedWorkstationId] = useState(
     activeWorkstations[0]?.id || ''
   );
+  const [viewMode, setViewMode] = useState<'day' | 'week'>('week');
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -43,6 +48,32 @@ const Schedule = () => {
       <PageHeader
         title="工位排期"
         subtitle="查看和管理暗房工位预约"
+        action={
+          <div className="flex items-center bg-darkroom-bg rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('day')}
+              className={`px-3 py-1.5 rounded-md text-sm flex items-center gap-1.5 transition-all ${
+                viewMode === 'day'
+                  ? 'bg-safelight-red/20 text-safelight-redLight'
+                  : 'text-gray-400 hover:text-film-cream'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              日视图
+            </button>
+            <button
+              onClick={() => setViewMode('week')}
+              className={`px-3 py-1.5 rounded-md text-sm flex items-center gap-1.5 transition-all ${
+                viewMode === 'week'
+                  ? 'bg-safelight-red/20 text-safelight-redLight'
+                  : 'text-gray-400 hover:text-film-cream'
+              }`}
+            >
+              <CalendarDays className="w-4 h-4" />
+              周视图
+            </button>
+          </div>
+        }
       />
 
       <div className="flex gap-6">
@@ -102,7 +133,9 @@ const Schedule = () => {
 
         <div className="flex-1 min-w-0">
           {selectedWorkstationId ? (
-            <WeekView workstationId={selectedWorkstationId} />
+            viewMode === 'day' 
+              ? <DayView workstationId={selectedWorkstationId} />
+              : <WeekView workstationId={selectedWorkstationId} />
           ) : (
             <div className="card-dark p-12 text-center">
               <MonitorCog className="w-16 h-16 mx-auto mb-4 text-gray-600" />

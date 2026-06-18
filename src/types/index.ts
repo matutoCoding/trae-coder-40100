@@ -46,6 +46,8 @@ export interface Bill {
   bookingId: string;
   totalAmount: number;
   discount: number;
+  discountType?: 'amount' | 'percent';
+  discountValue?: number;
   actualAmount: number;
   status: 'unpaid' | 'paid' | 'refunded';
   createdAt: Date;

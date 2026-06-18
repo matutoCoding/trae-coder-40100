@@ -13,6 +13,7 @@ interface BookingFormModalProps {
   defaultDate?: Date;
   defaultStartTime?: Date;
   defaultEndTime?: Date;
+  editingBookingId?: string;
 }
 
 const BookingFormModal = ({
@@ -22,8 +23,10 @@ const BookingFormModal = ({
   defaultDate,
   defaultStartTime,
   defaultEndTime,
+  editingBookingId,
 }: BookingFormModalProps) => {
-  const { workstations, rateTiers, createBooking, bookings } = useAppStore();
+  const { workstations, rateTiers, createBooking, bookings, rescheduleBooking } = useAppStore();
+  const editingBooking = editingBookingId ? bookings.find(b => b.id === editingBookingId) : null;
   
   const activeWorkstations = useMemo(
     () => workstations.filter(w => w.status === 'active'),
@@ -51,24 +54,55 @@ const BookingFormModal = ({
   const [conflict, setConflict] = useState<{ hasConflict: boolean; message?: string }>({ hasConflict: false });
   const [error, setError] = useState('');
   const isFirstOpen = useRef(true);
+  const prevCustomerNameRef = useRef('');
+  const prevCustomerPhoneRef = useRef('');
+  const prevNotesRef = useRef('');
+
+  useEffect(() => {
+    prevCustomerNameRef.current = formData.customerName;
+    prevCustomerPhoneRef.current = formData.customerPhone;
+    prevNotesRef.current = formData.notes;
+  }, [formData.customerName, formData.customerPhone, formData.notes]);
 
   useEffect(() => {
     if (isOpen) {
-      const wsId = initDefaultsRef.current.workstationId || activeWorkstations[0]?.id || '';
-      const d = initDefaultsRef.current.date;
-      const st = initDefaultsRef.current.startTime;
-      const et = initDefaultsRef.current.endTime;
+      let wsId: string;
+      let d: Date | undefined;
+      let st: Date | undefined;
+      let et: Date | undefined;
+      let customerName = '';
+      let customerPhone = '';
+      let notes = '';
+
+      if (editingBooking) {
+        wsId = editingBooking.workstationId;
+        const sDate = new Date(editingBooking.startTime);
+        const eDate = new Date(editingBooking.endTime);
+        d = sDate;
+        st = sDate;
+        et = eDate;
+        customerName = editingBooking.customerName;
+        customerPhone = editingBooking.customerPhone;
+        notes = editingBooking.notes || '';
+      } else {
+        wsId = initDefaultsRef.current.workstationId || activeWorkstations[0]?.id || '';
+        d = initDefaultsRef.current.date;
+        st = initDefaultsRef.current.startTime;
+        et = initDefaultsRef.current.endTime;
+        customerName = isFirstOpen.current ? '' : prevCustomerNameRef.current;
+        customerPhone = isFirstOpen.current ? '' : prevCustomerPhoneRef.current;
+        notes = isFirstOpen.current ? '' : prevNotesRef.current;
+      }
       
-      setFormData(prev => ({
-        ...prev,
+      setFormData({
         workstationId: wsId,
         date: d ? formatDate(d) : formatDate(new Date()),
         startTime: st ? formatTime(st) : '09:00',
         endTime: et ? formatTime(et) : '12:00',
-        customerName: isFirstOpen.current ? '' : prev.customerName,
-        customerPhone: isFirstOpen.current ? '' : prev.customerPhone,
-        notes: isFirstOpen.current ? '' : prev.notes,
-      }));
+        customerName,
+        customerPhone,
+        notes,
+      });
       isFirstOpen.current = false;
       setError('');
       setConflict({ hasConflict: false });
@@ -76,7 +110,7 @@ const BookingFormModal = ({
     } else {
       isFirstOpen.current = true;
     }
-  }, [isOpen, activeWorkstations]);
+  }, [isOpen, activeWorkstations, editingBookingId]);
 
   useEffect(() => {
     initDefaultsRef.current = {
@@ -120,7 +154,8 @@ const BookingFormModal = ({
         formData.workstationId,
         startTime,
         endTime,
-        bookings
+        bookings,
+        editingBookingId
       );
 
       setConflict({
@@ -143,7 +178,7 @@ const BookingFormModal = ({
       return;
     }
     if (conflict.hasConflict) {
-      setError('时段存在冲突，无法预约');
+      setError(editingBookingId ? '改期时段存在冲突' : '时段存在冲突，无法预约');
       return;
     }
 
@@ -159,25 +194,38 @@ const BookingFormModal = ({
       endTime = new Date(endTime.getTime() + 24 * 60 * 60 * 1000);
     }
 
-    const result = createBooking({
-      workstationId: formData.workstationId,
-      customerName: formData.customerName,
-      customerPhone: formData.customerPhone,
-      startTime,
-      endTime,
-      status: 'confirmed',
-      notes: formData.notes,
-    });
-
-    if (result.success) {
-      onClose();
+    if (editingBookingId) {
+      const result = rescheduleBooking(editingBookingId, {
+        workstationId: formData.workstationId,
+        startTime,
+        endTime,
+      });
+      if (result.success) {
+        onClose();
+      } else {
+        setError(result.error || '改期失败');
+      }
     } else {
-      setError(result.error || '预约失败');
+      const result = createBooking({
+        workstationId: formData.workstationId,
+        customerName: formData.customerName,
+        customerPhone: formData.customerPhone,
+        startTime,
+        endTime,
+        status: 'confirmed',
+        notes: formData.notes,
+      });
+
+      if (result.success) {
+        onClose();
+      } else {
+        setError(result.error || '预约失败');
+      }
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="新建预约" size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={editingBookingId ? "改期预约" : "新建预约"} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -246,6 +294,7 @@ const BookingFormModal = ({
               placeholder="请输入客户姓名"
               value={formData.customerName}
               onChange={(e) => setFormData({ ...formData, customerName: e.target.value })}
+              disabled={!!editingBookingId}
             />
           </div>
           <div>
@@ -256,6 +305,7 @@ const BookingFormModal = ({
               placeholder="请输入联系电话"
               value={formData.customerPhone}
               onChange={(e) => setFormData({ ...formData, customerPhone: e.target.value })}
+              disabled={!!editingBookingId}
             />
           </div>
         </div>
@@ -268,6 +318,7 @@ const BookingFormModal = ({
             placeholder="可选备注信息"
             value={formData.notes}
             onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+            disabled={!!editingBookingId}
           />
         </div>
 
@@ -330,7 +381,7 @@ const BookingFormModal = ({
             className="btn-primary"
             disabled={conflict.hasConflict}
           >
-            确认预约
+            {editingBookingId ? "确认改期" : "确认预约"}
           </button>
         </div>
       </form>

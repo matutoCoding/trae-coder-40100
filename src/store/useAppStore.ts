@@ -25,11 +25,20 @@ interface AppState {
     error?: string; 
     booking?: Booking 
   };
+  rescheduleBooking: (
+    id: string,
+    data: { workstationId: string; startTime: Date; endTime: Date }
+  ) => { success: boolean; error?: string; booking?: Booking };
   cancelBooking: (id: string) => void;
   completeBooking: (id: string) => void;
   
   addBill: (bill: Omit<Bill, 'id' | 'createdAt'>) => void;
   updateBill: (id: string, data: Partial<Bill>) => void;
+  applyDiscountToBill: (
+    id: string,
+    discountType: 'amount' | 'percent',
+    discountValue: number
+  ) => { success: boolean; error?: string };
   payBill: (id: string, paymentMethod: string) => void;
   refundBill: (id: string) => void;
   
@@ -271,6 +280,84 @@ export const useAppStore = create<AppState>()(
         return { success: true, booking: newBooking };
       },
 
+      rescheduleBooking: (id, data) => {
+        const { rateTiers, bookings, bills } = get();
+        const booking = bookings.find(b => b.id === id);
+        if (!booking) {
+          return { success: false, error: '预约不存在' };
+        }
+        if (booking.status === 'cancelled') {
+          return { success: false, error: '已取消的预约不能改期' };
+        }
+
+        const conflict = checkBookingConflict(
+          data.workstationId,
+          new Date(data.startTime),
+          new Date(data.endTime),
+          bookings,
+          id
+        );
+        if (conflict.hasConflict) {
+          return {
+            success: false,
+            error: `改期冲突：与${conflict.conflictingBookings.map(b => b.customerName).join(', ')}的预约冲突`,
+          };
+        }
+
+        const feeResult = calculateFee(
+          new Date(data.startTime),
+          new Date(data.endTime),
+          rateTiers
+        );
+
+        const updatedBooking: Booking = {
+          ...booking,
+          workstationId: data.workstationId,
+          startTime: new Date(data.startTime),
+          endTime: new Date(data.endTime),
+          totalAmount: feeResult.totalAmount,
+          feeBreakdown: feeResult.segments,
+        };
+
+        set((state) => {
+          const updatedBookings = state.bookings.map(b =>
+            b.id === id ? updatedBooking : b
+          );
+
+          const relatedBill = state.bills.find(b => b.bookingId === id);
+          let updatedBills = state.bills;
+          if (relatedBill) {
+            const newTotal = feeResult.totalAmount;
+            let discount = relatedBill.discount;
+            let discountType = relatedBill.discountType;
+            let discountValue = relatedBill.discountValue;
+            
+            if (discountType === 'percent' && discountValue !== undefined) {
+              discount = Math.round(newTotal * (discountValue / 100) * 100) / 100;
+            } else if (discountType === 'amount' && discountValue !== undefined) {
+              discount = Math.min(discountValue, newTotal);
+            } else {
+              discount = 0;
+            }
+            
+            updatedBills = state.bills.map(b =>
+              b.id === relatedBill.id
+                ? {
+                    ...b,
+                    totalAmount: newTotal,
+                    discount,
+                    actualAmount: Math.max(0, Math.round((newTotal - discount) * 100) / 100),
+                  }
+                : b
+            );
+          }
+
+          return { bookings: updatedBookings, bills: updatedBills };
+        });
+
+        return { success: true, booking: updatedBooking };
+      },
+
       cancelBooking: (id) => {
         set((state) => {
           const updatedBookings = state.bookings.map((b) =>
@@ -310,6 +397,42 @@ export const useAppStore = create<AppState>()(
             bill.id === id ? { ...bill, ...data } : bill
           ),
         }));
+      },
+
+      applyDiscountToBill: (id, discountType, discountValue) => {
+        const { bills } = get();
+        const bill = bills.find(b => b.id === id);
+        if (!bill) {
+          return { success: false, error: '账单不存在' };
+        }
+        if (bill.status !== 'unpaid') {
+          return { success: false, error: '只有待付款账单可以修改优惠' };
+        }
+        if (discountValue < 0) {
+          return { success: false, error: '优惠值不能为负数' };
+        }
+        if (discountType === 'percent' && discountValue > 100) {
+          return { success: false, error: '折扣比例不能超过100%' };
+        }
+
+        let discount = 0;
+        if (discountType === 'amount') {
+          discount = Math.min(discountValue, bill.totalAmount);
+        } else if (discountType === 'percent') {
+          discount = Math.round(bill.totalAmount * (discountValue / 100) * 100) / 100;
+        }
+
+        const actualAmount = Math.max(0, Math.round((bill.totalAmount - discount) * 100) / 100);
+
+        set((state) => ({
+          bills: state.bills.map(b =>
+            b.id === id
+              ? { ...b, discount, discountType, discountValue, actualAmount }
+              : b
+          ),
+        }));
+
+        return { success: true };
       },
 
       payBill: (id, paymentMethod) => {
